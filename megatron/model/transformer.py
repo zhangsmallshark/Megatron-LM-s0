@@ -89,7 +89,7 @@ class ParallelMLP(MegatronModule):
             ffn_hidden_size *= 2
 
         # Project to 4h. If using swiglu double the output width, see https://arxiv.org/pdf/2002.05202.pdf
-        self.dense_h_to_4h = tensor_parallel.ColumnParallelLinear(
+        self.dense_h_to_4h = tensor_parallel.ColumnParallelLinear1(
             config.hidden_size,
             ffn_hidden_size,
             config=config,
@@ -122,7 +122,7 @@ class ParallelMLP(MegatronModule):
             self.activation_func = F.gelu
 
         # Project back to h.
-        self.dense_4h_to_h = tensor_parallel.RowParallelLinear(
+        self.dense_4h_to_h = tensor_parallel.RowParallelLinear1(
             config.ffn_hidden_size,
             config.hidden_size,
             config=config,
@@ -136,19 +136,22 @@ class ParallelMLP(MegatronModule):
     def forward(self, hidden_states):
 
         # [s, b, 4hp]
-        intermediate_parallel, bias_parallel = self.dense_h_to_4h(hidden_states)
+        intermediate_parallel0, intermediate_parallel1, bias_parallel = self.dense_h_to_4h(hidden_states)
 
-        if self.bias_gelu_fusion:
-            assert self.add_bias is True
-            assert self.activation_func == F.gelu
-            intermediate_parallel = bias_gelu_impl(intermediate_parallel, bias_parallel)
-        else:
-            if bias_parallel is not None:
-                intermediate_parallel = intermediate_parallel + bias_parallel
-            intermediate_parallel = self.activation_func(intermediate_parallel)
+        # if self.bias_gelu_fusion:
+        #     assert self.add_bias is True
+        #     assert self.activation_func == F.gelu
+        #     intermediate_parallel = bias_gelu_impl(intermediate_parallel, bias_parallel)
+        # else:
+        #     if bias_parallel is not None:
+        #         intermediate_parallel = intermediate_parallel + bias_parallel
+        #     intermediate_parallel = self.activation_func(intermediate_parallel)
+
+        intermediate_parallel0 = self.activation_func(intermediate_parallel0)
+        intermediate_parallel1 = self.activation_func(intermediate_parallel1)
 
         # [s, b, h]
-        output, output_bias = self.dense_4h_to_h(intermediate_parallel)
+        output, output_bias = self.dense_4h_to_h(intermediate_parallel0, intermediate_parallel1)
         return output, output_bias
 
 def sinkhorn(cost, tol=0.0001):
