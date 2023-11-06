@@ -89,16 +89,16 @@ class ParallelMLP(MegatronModule):
             ffn_hidden_size *= 2
 
         # Project to 4h. If using swiglu double the output width, see https://arxiv.org/pdf/2002.05202.pdf
-        self.dense_h_to_4h = tensor_parallel.ColumnParallelLinear1(
-            config.hidden_size,
-            ffn_hidden_size,
-            config=config,
-            init_method=config.init_method,
-            bias=self.add_bias,
-            gather_output=False,
-            skip_bias_add=True,
-            is_expert=is_expert,
-        )
+        # self.dense_h_to_4h = tensor_parallel.ColumnParallelLinear1(
+        #     config.hidden_size,
+        #     ffn_hidden_size,
+        #     config=config,
+        #     init_method=config.init_method,
+        #     bias=self.add_bias,
+        #     gather_output=False,
+        #     skip_bias_add=True,
+        #     is_expert=is_expert,
+        # )
 
         self.bias_gelu_fusion = False
         self.activation_func = None
@@ -122,13 +122,24 @@ class ParallelMLP(MegatronModule):
             self.activation_func = F.gelu
 
         # Project back to h.
-        self.dense_4h_to_h = tensor_parallel.RowParallelLinear1(
-            config.ffn_hidden_size,
+        # self.dense_4h_to_h = tensor_parallel.RowParallelLinear1(
+        #     config.ffn_hidden_size,
+        #     config.hidden_size,
+        #     config=config,
+        #     init_method=config.output_layer_init_method,
+        #     bias=self.add_bias,
+        #     input_is_parallel=True,
+        #     skip_bias_add=True,
+        #     is_expert=is_expert,
+        # )
+
+        self.dense_h_to_h = tensor_parallel.ColRowParallelLinear(
             config.hidden_size,
+            ffn_hidden_size,
             config=config,
-            init_method=config.output_layer_init_method,
+            init_method=config.init_method,
             bias=self.add_bias,
-            input_is_parallel=True,
+            gather_output=False,
             skip_bias_add=True,
             is_expert=is_expert,
         )
@@ -136,7 +147,7 @@ class ParallelMLP(MegatronModule):
     def forward(self, hidden_states):
 
         # [s, b, 4hp]
-        intermediate_parallel0, intermediate_parallel1, bias_parallel = self.dense_h_to_4h(hidden_states)
+        # intermediate_parallel0, intermediate_parallel1, bias_parallel = self.dense_h_to_4h(hidden_states)
 
         # if self.bias_gelu_fusion:
         #     assert self.add_bias is True
@@ -147,11 +158,14 @@ class ParallelMLP(MegatronModule):
         #         intermediate_parallel = intermediate_parallel + bias_parallel
         #     intermediate_parallel = self.activation_func(intermediate_parallel)
 
-        intermediate_parallel0 = self.activation_func(intermediate_parallel0)
-        intermediate_parallel1 = self.activation_func(intermediate_parallel1)
+        # intermediate_parallel0 = self.activation_func(intermediate_parallel0)
+        # intermediate_parallel1 = self.activation_func(intermediate_parallel1)
 
         # [s, b, h]
-        output, output_bias = self.dense_4h_to_h(intermediate_parallel0, intermediate_parallel1)
+        # output, output_bias = self.dense_4h_to_h(intermediate_parallel0, intermediate_parallel1)
+
+        output, output_bias = self.dense_h_to_h(hidden_states)
+
         return output, output_bias
 
 def sinkhorn(cost, tol=0.0001):
